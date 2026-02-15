@@ -8,6 +8,8 @@
 
 #include "ray-tracing/cpu/rt_cpu.h"
 
+Color convert_to_raylib_color(RAYTRACING::CPU::color color);
+
 int main(int argc, char* argv[]) {
 
     Tracelog::Debug("Hello World");
@@ -24,8 +26,10 @@ int main(int argc, char* argv[]) {
     hittable_list world = random_scene();
     point3 currentCameraPos = point3(13, 2, 3);
 
+    double resScale = 0.75;
+
     // Window creation
-    int screenWidth = 516 * 1, screenHeight = 384 * 3;
+    int screenWidth = 512 * 1 * resScale, screenHeight = 384 * 3 * resScale;
     InitWindow(screenWidth, screenHeight, "Ray Tracing");
     SetWindowPosition(100, 100);
 
@@ -51,17 +55,17 @@ int main(int argc, char* argv[]) {
 
     bool progressive = true;
 
-    double differnceMult = 10;
+    double differnceMult = 1;
 
+    double acceptableDifferenceThreshold = 0.001;
     bool chunkedAverageDifference = true;
-    int chunkSize = 8;
+    int chunkSize = 16;
     int chunksWide = std::ceil(renderWidth / (float)chunkSize);
     int chunksTall = std::ceil(renderHeight / (float)chunkSize);
 
     Tracelog::Debug("ChunkSize: %d,", chunkSize);
     Tracelog::Debug("RenderWidth: %d, Therefore there render is %f chunks wide.", renderWidth, chunksWide);
     Tracelog::Debug("renderHeight: %d, Therefore there render is %f chunks tall.", renderHeight, chunksTall);
-
 
     while (!WindowShouldClose()) {
         float deltaTime = GetFrameTime();
@@ -89,33 +93,11 @@ int main(int argc, char* argv[]) {
 
             diff *= differnceMult;
 
+            DrawPixel(x, y + renderHeight * 0, convert_to_raylib_color(correctedColor));
 
-            Color color_v = {
-                static_cast<unsigned char>(256 * clamp(correctedColor.x(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(correctedColor.y(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(correctedColor.z(), 0.0, 0.999)),
-                static_cast<unsigned char>(255)
-            };
+            DrawPixel(x, y + renderHeight * 1, convert_to_raylib_color(correctedColorPrevious));
 
-            DrawPixel(x, y, color_v);
-
-            color_v = {
-                static_cast<unsigned char>(256 * clamp(correctedColorPrevious.x(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(correctedColorPrevious.y(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(correctedColorPrevious.z(), 0.0, 0.999)),
-                static_cast<unsigned char>(255)
-            };
-
-            DrawPixel(x, y + renderHeight, color_v);
-
-            color_v = {
-                static_cast<unsigned char>(256 * clamp(diff.x(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(diff.y(), 0.0, 0.999)),
-                static_cast<unsigned char>(256 * clamp(diff.z(), 0.0, 0.999)),
-                static_cast<unsigned char>(255)
-            };
-
-            DrawPixel(x, y + renderHeight + renderHeight, color_v);
+            //DrawPixel(x, y + renderHeight * 2, convert_to_raylib_color(diff));
 
             renderOutputSecondary[index] = renderOutputPrimay[index];
         }
@@ -158,38 +140,26 @@ int main(int argc, char* argv[]) {
                         if (averageDifference >= 0 && averageDifference <= 1) {
                             if (averageDifference > maxAverageDifference) maxAverageDifference = averageDifference;
                             if (averageDifference < minAverageDifference) minAverageDifference = averageDifference;
+                        }
 
-                            averageDifference *= differnceMult;
+                        averageDifference *= differnceMult;
 
-                            Color averagePixelDifference = {
-                            static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                            static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                            static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                            static_cast<unsigned char>(255)
-                            };
-
-                            DrawRectangle(0 + start_x, renderHeight * 3 + start_y, chunkWidth, chunkHeight, averagePixelDifference);
+                        // Color grid based on whether chunk is below threshold 
+                        if (averageDifference > acceptableDifferenceThreshold) {
+                            DrawRectangle(0 + start_x, renderHeight * 2 + start_y, chunkWidth, chunkHeight, ORANGE);
                         }
                         else {
-                            //DrawRectangle(0 + start_x, renderHeight * 3 + start_y, chunkWidth, chunkHeight, RED);
+                            DrawRectangle(0 + start_x, renderHeight * 2 + start_y, chunkWidth, chunkHeight, GREEN);
                         }
-
-
                         
+                        // Chunk average difference
+                        DrawRectangle(0 + start_x, renderHeight * 3 + start_y, chunkWidth, chunkHeight, convert_to_raylib_color(color(1, 1, 1) * averageDifference));
                     }
                 }
             }
             else {
-                Color averagePixelDifference = {
-                    static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                    static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                    static_cast<unsigned char>(256 * clamp(averageDifference, 0.0, 0.999)),
-                    static_cast<unsigned char>(255)
-                };
-
-                DrawRectangle(0, renderHeight * 3, renderWidth, renderHeight, averagePixelDifference);
+                DrawRectangle(0, renderHeight * 3, renderWidth, renderHeight, convert_to_raylib_color(color(averageDifference, averageDifference, averageDifference)));
             }
-
 
             Tracelog::Debug("Min Average Pixel Difference: %lf", minAverageDifference);
             Tracelog::Debug("Max Average Pixel Difference: %lf", maxAverageDifference);
@@ -209,8 +179,19 @@ int main(int argc, char* argv[]) {
     free(renderOutputPrimay);
     free(renderOutputSecondary);
     free(renderDifference);
-    //free(renderDifference);
     CloseWindow();
 
     return EXIT_SUCCESS;
+}
+
+Color convert_to_raylib_color(RAYTRACING::CPU::color color)
+{
+    Color color_v = {
+        static_cast<unsigned char>(256 * std::clamp(color.x(), 0.0, 0.999)),
+        static_cast<unsigned char>(256 * std::clamp(color.y(), 0.0, 0.999)),
+        static_cast<unsigned char>(256 * std::clamp(color.z(), 0.0, 0.999)),
+        static_cast<unsigned char>(255)
+    };
+
+    return color_v;
 }
