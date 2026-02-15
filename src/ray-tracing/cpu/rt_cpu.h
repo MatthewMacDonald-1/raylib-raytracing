@@ -227,10 +227,67 @@ namespace RAYTRACING {
 			render_world_mt(world, cam, image_width, image_height, samples_per_pixel, max_depth, pixel_output, progressiveRender);
 		}
 
+		struct PixelChunkData_t
+		{
+			int width;
+			int height;
+			color* pixel_data;
+			int number_of_samples;
+			int number_of_pixels;
+
+			static PixelChunkData_t* Build(int width, int height, int chunk_size) {
+				int chunks_wide = std::ceil(width / (float)chunk_size);
+				int chunks_tall = std::ceil(height / (float)chunk_size);
+				int number_of_chunks = chunks_wide * chunks_tall;
+
+				PixelChunkData_t* data = (PixelChunkData_t*)malloc(sizeof(PixelChunkData_t) * number_of_chunks);
+
+				for (int i = 0; i < number_of_chunks; i++) {
+					int cx = i % chunks_wide;
+					int cy = i / chunks_wide;
+
+					int start_y = cy * chunk_size;
+					int end_y = std::min(height, (cy + 1) * chunk_size);
+
+					int start_x = cx * chunk_size;
+					int end_x = std::min(width, (cx + 1) * chunk_size);
+
+					int chunk_width = end_x - start_x;
+					int chunk_height = end_y - start_y;
+
+					data[i].width = chunk_width;
+					data[i].height = chunk_height;
+					data[i].number_of_samples = 0;
+
+					data[i].number_of_pixels = chunk_width * chunk_height;
+
+					data[i].pixel_data = (color*)malloc(sizeof(color) * data[i].number_of_pixels);
+
+					for (int j = 0; j < data[i].number_of_pixels; j++) {
+						data[i].pixel_data[j] = color(0, 0, 0);
+					}
+				}
+
+				return data;
+			}
+
+			static void Free(PixelChunkData_t* data, int width, int height, int chunk_size) {
+				int chunks_wide = std::ceil(width / (float)chunk_size);
+				int chunks_tall = std::ceil(height / (float)chunk_size);
+				int number_of_chunks = chunks_wide * chunks_tall;
+
+				for (int i = 0; i < number_of_chunks; i++) {
+					free(data[i].pixel_data);
+				}
+
+				free(data);
+			}
+		};
+
 		/**
 		 * Multi core chunk based renderer. This is a progressive single sample renderer.
 		*/
-		void render_world_mt_chunk(hittable_list& world, camera cam, int image_width, int image_height, bool* render_chunk, int chunk_size, int max_depth, color* output) {
+		void render_world_mt_chunk(hittable_list& world, camera cam, int image_width, int image_height, bool* render_chunk, int chunk_size, int max_depth, PixelChunkData_t* output) {
 			const int chunks_wide = std::ceil(image_width / (float)chunk_size);
 			const int chunks_tall = std::ceil(image_height / (float)chunk_size);
 			const int numberOfChunks = chunks_wide * chunks_tall;
@@ -280,14 +337,13 @@ namespace RAYTRACING {
 								int cy = chunkIndex / chunks_wide;
 
 								int start_y = cy * chunk_size;
-								int end_y = std::min(image_height, (cy + 1) * chunk_size);
 
 								int start_x = cx * chunk_size;
-								int end_x = std::min(image_width, (cx + 1) * chunk_size);
 
-								int chunkWidth = end_x - start_x;
-								int chunkHeight = end_y - start_y;
+								int end_x = start_x + output[chunkIndex].width;
+								int end_y = start_y + output[chunkIndex].height;
 
+								int index = 0;
 								for (int y = start_y; y < end_y; y++) {
 									for (int x = start_x; x < end_x; x++) {
 										color pixel_color(0, 0, 0);
@@ -298,9 +354,12 @@ namespace RAYTRACING {
 											ray r = cam.get_ray(u, v);
 											pixel_color += ray_color(r, world, max_depth);
 										}
-										output[y * image_width + x] += pixel_color;
+										//output[y * image_width + x] += pixel_color;
+										output[chunkIndex].pixel_data[index] += pixel_color;
+										index++;
 									}
 								}
+								output[chunkIndex].number_of_samples++;
 							}
 						}
 					)
@@ -321,7 +380,7 @@ namespace RAYTRACING {
 		/**
 		* Progressively render an image in chunks from a predefined world.
 		*/
-		void renderWorldImageMCRT_ChunkWise(color* pixel_output, int image_width, int image_height, bool* render_chunk, int chunk_size, hittable_list& world, int max_depth, point3 camera_pos, point3 camera_looking_at, double vfov) {
+		void renderWorldImageMCRT_ChunkWise(PixelChunkData_t* pixel_output, int image_width, int image_height, bool* render_chunk, int chunk_size, hittable_list& world, int max_depth, point3 camera_pos, point3 camera_looking_at, double vfov) {
 
 			const double aspect_ratio = (double)image_width / (double)image_height;
 
@@ -355,7 +414,8 @@ namespace RAYTRACING {
 
 					for (int y = start_y; y < end_y; y++) {
 						for (int x = start_x; x < end_x; x++) {
-							int index = (renderHeight - 1 - y) * renderWidth + x;
+							int index = y * renderWidth + x;
+							//int index = (renderHeight - 1 - y) * renderWidth + x;
 
 							color diff = (correct_color_and_gamma(prev[index], samplesPerPixel - 1) - correct_color_and_gamma(curr[index], samplesPerPixel));
 
@@ -368,6 +428,26 @@ namespace RAYTRACING {
 			}
 		}
 
+		void computeChunkedDifference(double* difference, PixelChunkData_t* curr, PixelChunkData_t* prev, int size) {
+
+			for (int i = 0; i < size; i++) {
+
+				int width = curr[i].width;
+				int height = curr[i].height;
+				int number_of_pixels = width * height;
+
+				double renderDifferenceSum = 0;
+
+				for (int j = 0; j < number_of_pixels; j++) {
+					color diff = (correct_color_and_gamma(prev[i].pixel_data[j], prev[i].number_of_samples) - correct_color_and_gamma(curr[i].pixel_data[j], curr[i].number_of_samples));
+
+					renderDifferenceSum += diff.length();
+				}
+
+				difference[i] = renderDifferenceSum / (width * height);
+			}
+		}
+
 		void updateChunksToRender(bool* renderChunk, double threshold, double* difference, int size) {
 			for (int i = 0; i < size; i++) {
 				renderChunk[i] = difference[i] > threshold;
@@ -377,6 +457,21 @@ namespace RAYTRACING {
 		void copyImage(color* source, color* destination, int size) {
 			for (int i = 0; i < size; i++) {
 				destination[i] = source[i];
+			}
+		}
+
+		void copyImage(PixelChunkData_t* source, PixelChunkData_t* destination, int size) {
+			for (int i = 0; i < size; i++) {
+
+				if (destination[i].number_of_pixels != source[i].number_of_pixels) {
+					throw std::runtime_error("ERROR: pixel data must be of same length");
+				}
+
+				destination[i].number_of_samples = source[i].number_of_samples;
+
+				for (int j = 0; j < destination[i].number_of_pixels; j++) {
+					destination[i].pixel_data[j] = source[i].pixel_data[j];
+				}
 			}
 		}
 	}
