@@ -138,7 +138,7 @@ namespace RAYTRACING {
 		}
 
 		/**
-		 * Multi core render
+		 * Multi core renderer
 		*/
 		void render_world_mt(hittable_list& world, camera cam, int image_width, int image_height, int samples_per_pixel, int max_depth, color* rawPixelColors, bool progressiveRender) {
 			int cores = std::thread::hardware_concurrency();
@@ -227,5 +227,157 @@ namespace RAYTRACING {
 			render_world_mt(world, cam, image_width, image_height, samples_per_pixel, max_depth, pixel_output, progressiveRender);
 		}
 
+		/**
+		 * Multi core chunk based renderer. This is a progressive single sample renderer.
+		*/
+		void render_world_mt_chunk(hittable_list& world, camera cam, int image_width, int image_height, bool* render_chunk, int chunk_size, int max_depth, color* output) {
+			const int chunks_wide = std::ceil(image_width / (float)chunk_size);
+			const int chunks_tall = std::ceil(image_height / (float)chunk_size);
+			const int numberOfChunks = chunks_wide * chunks_tall;
+			const int samples_per_pixel = 1;
+
+			std::vector<int> chunkRenderIndexes;
+			for (int i = 0; i < numberOfChunks; i++) {
+				if (render_chunk[i]) {
+					chunkRenderIndexes.push_back(i);
+				}
+			}
+
+			const int max = chunkRenderIndexes.size();
+
+			int cores = (int)std::thread::hardware_concurrency();
+			const int cores_total = cores;
+			int chunkRenderIndex = 0;
+			std::vector<std::future<void>> future_vector;
+
+			std::mutex checkoutIndexLock;
+
+			std::atomic<int> exited = 0;
+
+			while (cores-- > 0)
+				future_vector.emplace_back(
+					std::async(
+						[=, &output, &chunkRenderIndex, &exited, &image_width, &image_height, &chunks_wide, &chunks_tall, &checkoutIndexLock, &chunk_size, &max]()
+
+						{
+							while (true)
+							{
+								checkoutIndexLock.lock();
+								if (chunkRenderIndex >= max) {
+
+									exited++;
+
+									checkoutIndexLock.unlock();
+									break;
+								}
+								int chunkIndex = chunkRenderIndex;
+								chunkRenderIndex++; // Checkout exactly one chunk to render
+								checkoutIndexLock.unlock();
+
+								// Do block render
+
+								int cx = chunkIndex % chunks_wide;
+								int cy = chunkIndex / chunks_wide;
+
+								int start_y = cy * chunk_size;
+								int end_y = std::min(image_height, (cy + 1) * chunk_size);
+
+								int start_x = cx * chunk_size;
+								int end_x = std::min(image_width, (cx + 1) * chunk_size);
+
+								int chunkWidth = end_x - start_x;
+								int chunkHeight = end_y - start_y;
+
+								for (int y = start_y; y < end_y; y++) {
+									for (int x = start_x; x < end_x; x++) {
+										color pixel_color(0, 0, 0);
+
+										for (int s = 0; s < samples_per_pixel; ++s) {
+											auto u = (x + random_double()) / (image_width - 1);
+											auto v = (y + random_double()) / (image_height - 1);
+											ray r = cam.get_ray(u, v);
+											pixel_color += ray_color(r, world, max_depth);
+										}
+										output[y * image_width + x] += pixel_color;
+									}
+								}
+							}
+						}
+					)
+				);
+
+			using namespace std::chrono;
+			using namespace std::this_thread;
+
+			// int prevCount, prevCount2 = 0;
+
+			while (!(exited == cores_total)) {
+				// Wait
+				sleep_until(system_clock::now() + nanoseconds(75000000));
+			}
+
+		}
+
+		/**
+		* Progressively render an image in chunks from a predefined world.
+		*/
+		void renderWorldImageMCRT_ChunkWise(color* pixel_output, int image_width, int image_height, bool* render_chunk, int chunk_size, hittable_list& world, int max_depth, point3 camera_pos, point3 camera_looking_at, double vfov) {
+
+			const double aspect_ratio = (double)image_width / (double)image_height;
+
+			// Camera
+			point3 lookfrom = camera_pos;
+			point3 lookat = camera_looking_at;
+			vec3 vup(0, 1, 0);
+			auto dist_to_focus = 10.0;
+			auto aperture = 0.0;
+			camera cam(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
+
+			render_world_mt_chunk(world, cam, image_width, image_height, render_chunk, chunk_size, max_depth, pixel_output);
+		}
+
+		void computeChunkedDifference(double* difference, color* curr, color* prev, int renderWidth, int renderHeight, int samplesPerPixel, int chunkSize, int chunksWide, int chunksTall) {
+
+			for (int cy = 0; cy < chunksTall; cy++) {
+				for (int cx = 0; cx < chunksWide; cx++) {
+
+					int start_y = cy * chunkSize;
+					int end_y = std::min(renderHeight, (cy + 1) * chunkSize);
+
+					int start_x = cx * chunkSize;
+					int end_x = std::min(renderWidth, (cx + 1) * chunkSize);
+
+					int chunkWidth = end_x - start_x;
+					int chunkHeight = end_y - start_y;
+					int chunkPixelCount = chunkHeight * chunkWidth;
+
+					double renderDifferenceSum = 0;
+
+					for (int y = start_y; y < end_y; y++) {
+						for (int x = start_x; x < end_x; x++) {
+							int index = (renderHeight - 1 - y) * renderWidth + x;
+
+							color diff = (correct_color_and_gamma(prev[index], samplesPerPixel - 1) - correct_color_and_gamma(curr[index], samplesPerPixel));
+
+							renderDifferenceSum += diff.length();
+						}
+					}
+
+					difference[cy * chunksWide + cx] = renderDifferenceSum / chunkPixelCount;
+				}
+			}
+		}
+
+		void updateChunksToRender(bool* renderChunk, double threshold, double* difference, int size) {
+			for (int i = 0; i < size; i++) {
+				renderChunk[i] = difference[i] > threshold;
+			}
+		}
+
+		void copyImage(color* source, color* destination, int size) {
+			for (int i = 0; i < size; i++) {
+				destination[i] = source[i];
+			}
+		}
 	}
 }
