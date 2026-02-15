@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
     hittable_list world = random_scene();
     point3 currentCameraPos = point3(13, 2, 3);
 
-    double resScale = 0.75;
+    double resScale = 1;
 
     // Window creation
     int screenWidth = 512 * 1 * resScale, screenHeight = 384 * 3 * resScale;
@@ -55,11 +55,11 @@ int main(int argc, char* argv[]) {
 
     bool progressive = true;
 
-    double differnceMult = 1;
+    double differnceMult = 10;
 
-    double acceptableDifferenceThreshold = 0.001;
+    double acceptableDifferenceThreshold = 0.0025;
     bool chunkedAverageDifference = true;
-    int chunkSize = 16;
+    int chunkSize = 6;
     int chunksWide = std::ceil(renderWidth / (float)chunkSize);
     int chunksTall = std::ceil(renderHeight / (float)chunkSize);
 
@@ -142,15 +142,15 @@ int main(int argc, char* argv[]) {
                             if (averageDifference < minAverageDifference) minAverageDifference = averageDifference;
                         }
 
-                        averageDifference *= differnceMult;
-
                         // Color grid based on whether chunk is below threshold 
-                        if (averageDifference > acceptableDifferenceThreshold) {
-                            DrawRectangle(0 + start_x, renderHeight * 2 + start_y, chunkWidth, chunkHeight, ORANGE);
-                        }
-                        else {
+                        if (averageDifference < acceptableDifferenceThreshold) {
                             DrawRectangle(0 + start_x, renderHeight * 2 + start_y, chunkWidth, chunkHeight, GREEN);
                         }
+                        else {
+                            DrawRectangle(0 + start_x, renderHeight * 2 + start_y, chunkWidth, chunkHeight, ORANGE);
+                        }
+
+                        averageDifference *= differnceMult;
                         
                         // Chunk average difference
                         DrawRectangle(0 + start_x, renderHeight * 3 + start_y, chunkWidth, chunkHeight, convert_to_raylib_color(color(1, 1, 1) * averageDifference));
