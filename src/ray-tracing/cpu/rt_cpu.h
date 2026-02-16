@@ -444,13 +444,56 @@ namespace RAYTRACING {
 					renderDifferenceSum += diff.length();
 				}
 
-				difference[i] = renderDifferenceSum / (width * height);
+				difference[i] = renderDifferenceSum / number_of_pixels;
 			}
 		}
 
-		void updateChunksToRender(bool* renderChunk, double threshold, double* difference, int size) {
+		void computeChunkNoise(double* noise, PixelChunkData_t* data, int size) {
 			for (int i = 0; i < size; i++) {
-				renderChunk[i] = difference[i] > threshold;
+
+				double noiseSum = 0;
+
+				std::vector<color> pixel_colors(data[i].number_of_pixels);
+
+				for (int j = 0; j < data[i].number_of_pixels; j++) {
+					pixel_colors[j] = correct_color_and_gamma(data[i].pixel_data[j], data[i].number_of_samples);
+				}
+
+				for (int y = 0; y < data[i].height; y++) {
+					for (int x = 0; x < data[i].width; x++) {
+
+						color neighbours = color(0, 0, 0);
+						double sum = 0;
+
+						if (x > 1) {
+							neighbours += pixel_colors[y * data[i].width + (x - 1)];
+							sum++;
+						}
+						if (y > 1) {
+							neighbours += pixel_colors[(y - 1) * data[i].width + x];
+							sum++;
+						}
+
+						if (x < data[i].width - 1) { 
+							neighbours += pixel_colors[y * data[i].width + (x + 1)];
+							sum++;
+						}
+						if (y < data[i].height - 1) {
+							neighbours += pixel_colors[(y + 1) * data[i].width + x];
+							sum++;
+						}
+
+						noiseSum += (pixel_colors[y * data[i].width + x] - (neighbours / sum)).length();
+					}
+				}
+
+				noise[i] = noiseSum / data[i].number_of_pixels;
+			}
+		}
+
+		void updateChunksToRender(bool* renderChunk, PixelChunkData_t* data, int max_samples, double threshold, double* difference, int size) {
+			for (int i = 0; i < size; i++) {
+				renderChunk[i] = difference[i] > threshold && data[i].number_of_samples < max_samples;
 			}
 		}
 

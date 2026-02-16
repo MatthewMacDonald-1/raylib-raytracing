@@ -3,16 +3,20 @@
 #include <stdio.h>
 #include <raylib.h>
 #include <cmath>
+#include <raymath.h>
 
 #include "utility/utility-core.hpp"
 
 #include "ray-tracing/cpu/rt_cpu.h"
+
+bool flipImage = false;
 
 Color convert_to_raylib_color(RAYTRACING::CPU::color color);
 void draw_image_to_screen(int x, int y, RAYTRACING::CPU::color* pixel_data, int width, int height, int samples_per_pixel);
 void draw_image_to_screen(int x, int y, RAYTRACING::CPU::PixelChunkData_t* pixel_data, int width, int height, int chunk_size);
 void draw_chunks_not_complete_to_screen(int x, int y, bool* render_chunk, int width, int height, int chunk_size);
 void draw_chunk_difference_to_screen(int x, int y, double* difference, double mutliplier, int width, int height, int chunk_size, bool print_stats = false);
+void draw_chunk_sample_temp_screen(int x, int y, RAYTRACING::CPU::PixelChunkData_t* data, bool* render_chunk, int width, int height, int chunk_size, float sample_count);
 
 int main(int argc, char* argv[]) {
 
@@ -30,16 +34,19 @@ int main(int argc, char* argv[]) {
     hittable_list world = random_scene();
     point3 currentCameraPos = point3(13, 2, 3);
 
-    double resScale = 1;
+    double resScale = 0.75;
 
     // Window creation
-    int screenWidth = 512 * 1 * resScale, screenHeight = 384 * 3 * resScale;
+    int renderWidth = 512 * resScale;
+    int renderHeight = 256 * resScale;
+
+    int screenWidth = renderWidth, screenHeight = renderHeight * 4;
     InitWindow(screenWidth, screenHeight, "Ray Tracing");
     SetWindowPosition(100, 100);
 
 
     // Render size
-    int renderWidth = screenWidth, renderHeight = screenHeight / 4;
+    //int renderWidth = screenWidth, renderHeight = screenHeight / 3;
     int maxRenderPixels = renderWidth * renderHeight;
     Tracelog::Debug("Max pixels: %d.", maxRenderPixels);
 
@@ -53,11 +60,12 @@ int main(int argc, char* argv[]) {
 
     long frameCount = 1;
 
-    double differnceMult = 10;
+    double differnceMult = 1;
 
-    double acceptableDifferenceThreshold = 0.0025;
-    bool chunkedAverageDifference = true;
-    int chunkSize = 8;
+    double acceptableNoiseThreshold = 0.025;
+    int maxSamples = 250;
+
+    int chunkSize = 4;
     int chunksWide = std::ceil(renderWidth / (float)chunkSize);
     int chunksTall = std::ceil(renderHeight / (float)chunkSize);
     int numberOfChunks = chunksWide * chunksTall;
@@ -100,21 +108,24 @@ int main(int argc, char* argv[]) {
 
         // Compute Chunked difference
         if (frameCount > 1) {
-            computeChunkedDifference(chunkDifference, pixelDataPrimary, pixelDataSecondary, numberOfChunks);
+            //computeChunkedDifference(chunkDifference, pixelDataPrimary, pixelDataSecondary, numberOfChunks);
+            computeChunkNoise(chunkDifference, pixelDataPrimary, numberOfChunks);
             //computeChunkedDifference(chunkDifference, renderOutputPrimay, renderOutputSecondary, renderWidth, renderHeight, frameCount, chunkSize, chunksWide, chunksTall);
-            updateChunksToRender(renderChunk, acceptableDifferenceThreshold, chunkDifference, numberOfChunks);
+            updateChunksToRender(renderChunk, pixelDataPrimary, maxSamples, acceptableNoiseThreshold, chunkDifference, numberOfChunks);
         }
 
         // Visualisation of current vs previous
         
         //draw_image_to_screen(0, 0, renderOutputPrimay, renderWidth, renderHeight, frameCount);
         draw_image_to_screen(0, 0, pixelDataPrimary, renderWidth, renderHeight, chunkSize);
-        draw_chunks_not_complete_to_screen(0, renderHeight * 2, renderChunk, renderWidth, renderHeight, chunkSize);
-        if (frameCount > 1) {
+        draw_chunks_not_complete_to_screen(0, renderHeight * 1, renderChunk, renderWidth, renderHeight, chunkSize);
+        //if (frameCount > 1) {
             //draw_image_to_screen(0, renderHeight, renderOutputSecondary, renderWidth, renderHeight, frameCount - 1);
-            draw_image_to_screen(0, renderHeight, pixelDataSecondary, renderWidth, renderHeight, chunkSize);
-            draw_chunk_difference_to_screen(0, renderHeight * 3, chunkDifference, differnceMult, renderWidth, renderHeight, chunkSize, !renderFinished);
-        }
+            //draw_image_to_screen(0, renderHeight, pixelDataSecondary, renderWidth, renderHeight, chunkSize);
+            draw_chunk_difference_to_screen(0, renderHeight * 2, chunkDifference, differnceMult, renderWidth, renderHeight, chunkSize, !renderFinished);
+        //}
+
+        draw_chunk_sample_temp_screen(0, renderHeight * 3, pixelDataPrimary, renderChunk, renderWidth, renderHeight, chunkSize, frameCount);
 
         if (!renderFinished) {
             int sum = 0;
@@ -189,6 +200,7 @@ void draw_image_to_screen(int x, int y, RAYTRACING::CPU::color* pixel_data, int 
     for (int index = 0; index < size; index++) {
         int px = index % width;
         int py = index / width;
+        if (flipImage) py = height - py - 1; // Flip y coord
         //py = height - py - 1; // Flip y coord
 
         color correctedColor = correct_color_and_gamma(pixel_data[index], samples_per_pixel);
@@ -220,11 +232,15 @@ void draw_image_to_screen(int x, int y, RAYTRACING::CPU::PixelChunkData_t* pixel
 
         int index = 0;
         for (int py = start_y; py < end_y; py++) {
+            int py_mod = py;
+            if (flipImage) py_mod = height - py - 1; // Flip y coord
             for (int px = start_x; px < end_x; px++) {
                 
                 color correctedColor = correct_color_and_gamma(pixel_data[chunkIndex].pixel_data[index], pixel_data[chunkIndex].number_of_samples);
 
-                DrawPixel(x + px, y + py, convert_to_raylib_color(correctedColor));
+                
+
+                DrawPixel(x + px, y + py_mod, convert_to_raylib_color(correctedColor));
                 index++;
             }
         }
@@ -236,10 +252,6 @@ void draw_chunks_not_complete_to_screen(int x, int y, bool* render_chunk, int wi
     int chunksWide = std::ceil(width / (float)chunk_size);
     int chunksTall = std::ceil(height / (float)chunk_size);
     int numberOfChunks = chunksWide * chunksTall;
-
-    double sumOfDifference = 0;
-    double minAverageDifference = 1;
-    double maxAverageDifference = 0;
 
     for (int index = 0; index < numberOfChunks; index++) {
         int start_x = (index % chunksWide) * chunk_size;
@@ -300,5 +312,30 @@ void draw_chunk_difference_to_screen(int x, int y, double* difference, double mu
         Tracelog::Debug("Average Pixel Difference: %lf", (sumOfDifference / numberOfChunks));
         Tracelog::Debug("Min Average Pixel Difference: %lf", minAverageDifference);
         Tracelog::Debug("Max Average Pixel Difference: %lf", maxAverageDifference);
+    }
+}
+
+void draw_chunk_sample_temp_screen(int x, int y, RAYTRACING::CPU::PixelChunkData_t* data, bool* render_chunk, int width, int height, int chunk_size, float sample_count)
+{
+
+    int chunksWide = std::ceil(width / (float)chunk_size);
+    int chunksTall = std::ceil(height / (float)chunk_size);
+    int numberOfChunks = chunksWide * chunksTall;
+
+    for (int index = 0; index < numberOfChunks; index++) {
+        int start_x = (index % chunksWide) * chunk_size;
+        int start_y = (index / chunksWide) * chunk_size;
+
+        int end_y = std::min(height, start_y + chunk_size);
+
+        int end_x = std::min(width, start_x + chunk_size);
+
+        int chunkWidth = end_x - start_x;
+        int chunkHeight = end_y - start_y;
+
+        double scalar = render_chunk[index] ? 1 : 0.5;
+
+        DrawRectangle(x + start_x, y + start_y, chunkWidth, chunkHeight, convert_to_raylib_color(RAYTRACING::CPU::color(Lerp(0, 1, data[index].number_of_samples / sample_count), 0, Lerp(1, 0, data[index].number_of_samples / sample_count)) * scalar));
+        
     }
 }
