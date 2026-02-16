@@ -314,7 +314,7 @@ namespace RAYTRACING {
 			while (cores-- > 0)
 				future_vector.emplace_back(
 					std::async(
-						[=, &output, &chunkRenderIndex, &exited, &image_width, &image_height, &chunks_wide, &chunks_tall, &checkoutIndexLock, &chunk_size, &max]()
+						[=, &output, &chunkRenderIndex, &chunkRenderIndexes, &exited, &image_width, &image_height, &chunks_wide, &chunks_tall, &checkoutIndexLock, &chunk_size, &max]()
 
 						{
 							while (true)
@@ -327,7 +327,7 @@ namespace RAYTRACING {
 									checkoutIndexLock.unlock();
 									break;
 								}
-								int chunkIndex = chunkRenderIndex;
+								int chunkIndex = chunkRenderIndexes[chunkRenderIndex];
 								chunkRenderIndex++; // Checkout exactly one chunk to render
 								checkoutIndexLock.unlock();
 
