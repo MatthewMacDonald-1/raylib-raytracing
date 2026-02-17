@@ -287,7 +287,7 @@ namespace RAYTRACING {
 		/**
 		 * Multi core chunk based renderer. This is a progressive single sample renderer.
 		*/
-		void render_world_mt_chunk(hittable_list& world, camera cam, int image_width, int image_height, bool* render_chunk, int chunk_size, int max_depth, PixelChunkData_t* output) {
+		void render_world_mt_chunk(hittable_list& world, camera cam, int image_width, int image_height, bool* render_chunk, int chunk_size, int max_depth, PixelChunkData_t* output, int thread_limit = -1) {
 			const int chunks_wide = std::ceil(image_width / (float)chunk_size);
 			const int chunks_tall = std::ceil(image_height / (float)chunk_size);
 			const int numberOfChunks = chunks_wide * chunks_tall;
@@ -303,6 +303,11 @@ namespace RAYTRACING {
 			const int max = chunkRenderIndexes.size();
 
 			int cores = (int)std::thread::hardware_concurrency();
+
+			if (thread_limit != -1 && thread_limit > 0) {
+				cores = std::min(cores, thread_limit);
+			}
+
 			const int cores_total = cores;
 			int chunkRenderIndex = 0;
 			std::vector<std::future<void>> future_vector;
@@ -380,7 +385,7 @@ namespace RAYTRACING {
 		/**
 		* Progressively render an image in chunks from a predefined world.
 		*/
-		void renderWorldImageMCRT_ChunkWise(PixelChunkData_t* pixel_output, int image_width, int image_height, bool* render_chunk, int chunk_size, hittable_list& world, int max_depth, point3 camera_pos, point3 camera_looking_at, double vfov) {
+		void renderWorldImageMCRT_ChunkWise(PixelChunkData_t* pixel_output, int image_width, int image_height, bool* render_chunk, int chunk_size, hittable_list& world, int max_depth, point3 camera_pos, point3 camera_looking_at, double vfov, int thread_limit = -1) {
 
 			const double aspect_ratio = (double)image_width / (double)image_height;
 
@@ -392,7 +397,7 @@ namespace RAYTRACING {
 			auto aperture = 0.0;
 			camera cam(lookfrom, lookat, vup, vfov, aspect_ratio, aperture, dist_to_focus);
 
-			render_world_mt_chunk(world, cam, image_width, image_height, render_chunk, chunk_size, max_depth, pixel_output);
+			render_world_mt_chunk(world, cam, image_width, image_height, render_chunk, chunk_size, max_depth, pixel_output, thread_limit);
 		}
 
 		void computeChunkedDifference(double* difference, color* curr, color* prev, int renderWidth, int renderHeight, int samplesPerPixel, int chunkSize, int chunksWide, int chunksTall) {

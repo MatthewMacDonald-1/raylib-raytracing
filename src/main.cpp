@@ -22,6 +22,9 @@ int main(int argc, char* argv[]) {
 
     Tracelog::Debug("Hello World");
 
+    int thread_limit = 10;
+    Tracelog::Debug("Threads limit: %d / %d", thread_limit, (int)std::thread::hardware_concurrency());
+
 
     using namespace RAYTRACING::CPU;
 
@@ -34,13 +37,13 @@ int main(int argc, char* argv[]) {
     hittable_list world = random_scene();
     point3 currentCameraPos = point3(13, 2, 3);
 
-    double resScale = 2;
+    double resScale = 4;
 
     // Window creation
     int renderWidth = 512 * resScale;
     int renderHeight = 256 * resScale;
 
-    int screenWidth = renderWidth, screenHeight = renderHeight * 4;
+    int screenWidth = renderWidth, screenHeight = renderHeight * 2;
     InitWindow(screenWidth, screenHeight, "Ray Tracing");
     SetWindowPosition(100, 100);
 
@@ -65,7 +68,7 @@ int main(int argc, char* argv[]) {
     double acceptableNoiseThreshold = 0.01;
     int maxSamples = 250;
 
-    int chunkSize = 8;
+    int chunkSize = 16;
     int chunksWide = std::ceil(renderWidth / (float)chunkSize);
     int chunksTall = std::ceil(renderHeight / (float)chunkSize);
     int numberOfChunks = chunksWide * chunksTall;
@@ -79,7 +82,7 @@ int main(int argc, char* argv[]) {
     double* chunkDifference = (double*)malloc(sizeof(double) * numberOfChunks);
     bool* renderChunk = (bool*)malloc(sizeof(bool) * numberOfChunks);
 
-    //numberOfChunks = chunksWide;
+    //numberOfChunks = chunksWide; 
 
     for (int i = 0; i < numberOfChunks; i++) {
         chunkDifference[i] = 0;
@@ -101,7 +104,7 @@ int main(int argc, char* argv[]) {
         // Render scene using software ray tracing
 
         if (!renderFinished) {
-            renderWorldImageMCRT_ChunkWise(pixelDataPrimary, renderWidth, renderHeight, renderChunk, chunkSize, world, maxDepth, currentCameraPos, point3(0, 0, 0), vFov);
+            renderWorldImageMCRT_ChunkWise(pixelDataPrimary, renderWidth, renderHeight, renderChunk, chunkSize, world, maxDepth, currentCameraPos, point3(0, 0, 0), vFov, thread_limit);
         }
 
         // Compute Chunked difference
@@ -113,9 +116,9 @@ int main(int argc, char* argv[]) {
         // Visualisation of current
         draw_image_to_screen(0, 0, pixelDataPrimary, renderWidth, renderHeight, chunkSize);
         draw_chunks_not_complete_to_screen(0, renderHeight * 1, renderChunk, renderWidth, renderHeight, chunkSize);
-        draw_chunk_difference_to_screen(0, renderHeight * 2, chunkDifference, differnceMult, renderWidth, renderHeight, chunkSize, !renderFinished);
+        //draw_chunk_difference_to_screen(0, renderHeight * 2, chunkDifference, differnceMult, renderWidth, renderHeight, chunkSize, !renderFinished);
 
-        draw_chunk_sample_temp_screen(0, renderHeight * 3, pixelDataPrimary, renderChunk, renderWidth, renderHeight, chunkSize, frameCount);
+        //draw_chunk_sample_temp_screen(0, renderHeight * 3, pixelDataPrimary, renderChunk, renderWidth, renderHeight, chunkSize, frameCount);
 
         if (!renderFinished) {
             int sum = 0;
